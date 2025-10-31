@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mars Stations Viewer</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #000000;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        .live-clock {
+            font-size: 48px;
+            font-family: monospace;
+            color: white; /* Using your Mars theme color */
+            margin: 20px;
+
+        }
+
+        #live-clock-utc {
+            position: absolute;
+            top: 20px; /* Adjust this value to set height above Mars */
+            left: 50%;
+            transform: translateX(-50%); /* Crucial for perfect horizontal centering */
+            color: white;
+            font-size: 32px; /* Adjusted size for better placement */
+            font-family: monospace;
+            background: rgba(0, 0, 0, 0.7); /* Background for visibility over the 3D scene */
+            padding: 10px 15px;
+            border-radius: 5px;
+            z-index: 10;
+        }
+
+        #station-popup-time {
+            font-size: 32px; /* Adjusted size for better placement */
+            font-family: monospace;
+            color: white;
+        }
+
+        #station-popup {
+            position: absolute;
+            left: 10px;
+            bottom: 10px;
+            background: rgba(255, 144, 104, 0.9);
+            color: #610000;
+            padding: 15px;
+            border-radius: 8px;
+        {#border: 2px solid #ff6b35;#} z-index: 20;
+            display: none;
+            max-width: 300px;
+            overflow: hidden;
+        }
+
+        #info-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 10;
+            max-width: 300px;
+        }
+
+        #info-overlay h1 {
+            margin: 0 0 10px 0;
+            font-size: 20px;
+        }
+
+        #info-overlay p {
+            margin: 5px 0;
+            font-size: 12px;
+        }
+
+        #stations-index {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 10;
+            max-width: 250px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        #stations-index h2 {
+            margin: 0 0 15px 0;
+            font-size: 18px;
+            border-bottom: 2px solid #ff6b35;
+            padding-bottom: 5px;
+        }
+
+        .station-item {
+            padding: 10px;
+            margin: 5px 0;
+            background: rgba(255, 107, 53, 0.2);
+            border-left: 3px solid #ff6b35;
+            cursor: pointer;
+            transition: all 0.3s;
+            border-radius: 4px;
+        }
+
+        .station-item:hover {
+            background: rgba(255, 107, 53, 0.4);
+            transform: translateX(-5px);
+        }
+
+        .station-name {
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 3px;
+        }
+
+        .station-coords {
+            font-size: 11px;
+            color: #aaa;
+        }
+
+        #station-popup {
+            position: absolute;
+            left: 10px;
+            bottom: 10px;
+            background: rgba(255, 144, 104, 0.9);
+            color: #610000;
+            padding: 15px;
+            border-radius: 8px;
+        {#border: 2px solid #ff6b35;#} z-index: 20;
+            display: none;
+            max-width: 300px;
+        }
+
+        #station-popup h3 {
+            margin: 0 0 10px 0;
+            color: #610000;
+        }
+
+        #station-popup p {
+            margin: 5px 0;
+            font-size: 13px;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
+            z-index: 5;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #ff6b35;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+<div id="info-overlay">
+    <h1>🔴 Mars Stations Viewer</h1>
+    <p>Explore Mars research stations</p>
+    <p><strong>Controls:</strong></p>
+    <p>• Drag to rotate</p>
+    <p>• Scroll to zoom</p>
+    <p>• Click markers or sidebar to view stations</p>
+    <p><strong>Terms:</strong></p>
+    <p>• UTC stands for Universal Time Coordinated</p>
+    <p>• LTST stands for Local True Solar Time</p>
+</div>
+
+<div id="live-clock-utc" class="live-clock"></div>
+
+<div id="stations-index">
+    <h2>Mars Stations</h2>
+    <div id="stations-list"></div>
+</div>
+
+<div id="station-popup"></div>
+<div id="loading">Loading Mars texture...</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+    let marsTimeIntervalId = null;
+    // Mars stations database (lat, lon in degrees)
+    const stations = [
+        {
+            name: "Olympus Mons Base",
+            lat: 18.65,
+            lon: -133.8,
+            description: "Research station at the summit of the largest volcano in the solar system.",
+            type: "Research",
+            // Image retrieved from: https://en.wikipedia.org/wiki/Olympus_Mons
+            image: "/static/olympus.png"
+        },
+        {
+            name: "Valles Marineris Station",
+            lat: -13.9,
+            lon: -59.2,
+            description: "Deep canyon exploration facility studying Mars' geological history.",
+            type: "Exploration",
+            // Image retrieved from: https://en.wikipedia.org/wiki/Valles_Marineris
+            image: "/static/valles.jpg"
+        },
+        {
+            name: "Gale Crater Lab",
+            lat: -5.4,
+            lon: 137.8,
+            description: "Site of extensive water flow research and rover operations.",
+            type: "Research",
+            // Image retrieved from: https://graphics.latimes.com/mars-gale-crater-how-we-did-it/
+            image: "/static/gale.jpg"
+        },
+        {
+            name: "Hellas Planitia Outpost",
+            lat: -42.4,
+            lon: 70.5,
+            description: "Located in one of the deepest impact craters in the solar system.",
+            type: "Mining",
+            // Image retrieved from: https://en.wikipedia.org/wiki/Hellas_Planitia
+            image: "/static/hellas.jpg"
+        },
+        {
+            name: "Jezero Crater Base",
+            lat: 18.38,
+            lon: 77.58,
+            description: "Ancient river delta exploration site with biosignature research.",
+            type: "Research",
+            // Image retrieved from: https://en.wikipedia.org/wiki/Jezero_(crater)
+            image: "/static/jezero.png"
+        },
+        {
+            name: "Arcadia Planitia Hub",
+            lat: 46.7,
+            lon: -170.0,
+            description: "Northern plains ice mining and habitation center.",
+            type: "Colony",
+            // Image retrieved from: https://www.esa.int/ESA_Multimedia/Images/2025/06/Arcadia_Planitia_as_seen_by_ESA_s_Mars_Express
+            image: "/static/arcadia-v2.png"
+        },
+        {
+            name: "Elysium Mons Station",
+            lat: 25.02,
+            lon: 147.21,
+            description: "Volcanic studies and geothermal energy research facility.",
+            type: "Energy",
+            // Image retrieved from: https://www.jpl.nasa.gov/images/pia00412-elysium/
+            image: "/static/elysium.png"
+        }
+    ];
+
+    // Scene setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({antialias: true});
+
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    camera.position.z = 2.5;
+
+    // Lighting - brighter ambient light and directional light that follows camera
+    const ambientLight = new THREE.AmbientLight(0x666666);
+    scene.add(ambientLight);
+
+    const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    scene.add(sunLight);
+
+    // Create Mars geometry
+    const geometry = new THREE.SphereGeometry(1, 64, 64);
+    let mars;
+    let stationMarkers = [];
+    let selectedStation = null;
+    let selectedMarker = null;
+
+    // Convert lat/lon to 3D position on sphere
+    function latLonToVector3(lat, lon, radius) {
+        const phi = (90 - lat) * (Math.PI / 180);
+        const theta = (lon + 180) * (Math.PI / 180);
+
+        const x = -(radius * Math.sin(phi) * Math.cos(theta));
+        const z = (radius * Math.sin(phi) * Math.sin(theta));
+        const y = (radius * Math.cos(phi));
+
+        return new THREE.Vector3(x, y, z);
+    }
+
+    // Create station markers
+    function createStationMarker(station) {
+        const markerGeometry = new THREE.SphereGeometry(0.02, 16, 16);
+        const markerMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff6b35,
+            emissive: 0xff6b35,
+            emissiveIntensity: 0.5
+        });
+        const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+
+        const position = latLonToVector3(station.lat, station.lon, 1.01);
+        marker.position.copy(position);
+
+        // Add a glowing ring
+        const ringGeometry = new THREE.RingGeometry(0.03, 0.04, 32);
+        const ringMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff6b35,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.6
+        });
+        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        ring.lookAt(new THREE.Vector3(0, 0, 0));
+        ring.position.copy(position);
+
+        marker.userData.station = station;
+        ring.userData.station = station;
+
+        // Add markers as children of Mars so they rotate together
+        mars.add(marker);
+        mars.add(ring);
+
+        return {marker, ring};
+    }
+
+    // Populate stations index
+    function populateStationsIndex() {
+        const listEl = document.getElementById('stations-list');
+        listEl.innerHTML = '';
+
+        stations.forEach((station, index) => {
+            const item = document.createElement('div');
+            item.className = 'station-item';
+            item.innerHTML = `
+                        <div class="station-name">${station.name}</div>
+                        <div class="station-coords">${station.type} • ${station.lat.toFixed(1)}°, ${station.lon.toFixed(1)}°</div>
+                    `;
+            item.addEventListener('click', () => focusOnStation(station));
+            listEl.appendChild(item);
+        });
+    }
+
+    // Focus camera on station
+    function focusOnStation(station) {
+        selectedStation = station;
+
+        // Get the 3D position of the station on Mars surface
+        const stationPos = latLonToVector3(station.lat, station.lon, 1);
+
+        // Calculate camera position to look at this point
+        // We want the camera to be at a distance looking at the station
+        const distance = camera.position.length();
+        const cameraTargetPos = stationPos.clone().normalize().multiplyScalar(distance);
+
+        // Animate camera movement
+        animateCameraToPosition(cameraTargetPos, stationPos);
+
+        // Show popup
+        showStationPopup(station);
+    }
+
+    // Animate camera to new position
+    function animateCameraToPosition(targetPos, lookAtPos) {
+        const startPos = camera.position.clone();
+        const duration = 1000;
+        const startTime = Date.now();
+
+        function animate() {
+            const now = Date.now();
+            const progress = Math.min((now - startTime) / duration, 1);
+            const eased = 1 - Math.pow(1 - progress, 3); // ease out
+
+            camera.position.lerpVectors(startPos, targetPos, eased);
+            camera.lookAt(lookAtPos);
+
+            if (progress < 1) {
+                requestAnimationFrame(animate);
+            }
+        }
+
+        animate();
+    }
+
+    // Animate mars rotation
+    function animateToRotation(targetX, targetY) {
+        const startX = mars.rotation.x;
+        const startY = mars.rotation.y;
+        const duration = 1000;
+        const startTime = Date.now();
+
+        function animate() {
+            const now = Date.now();
+            const progress = Math.min((now - startTime) / duration, 1);
+            const eased = 1 - Math.pow(1 - progress, 3); // ease out
+
+            mars.rotation.x = startX + (targetX - startX) * eased;
+            mars.rotation.y = startY + (targetY - startY) * eased;
+
+            if (progress < 1) {
+                requestAnimationFrame(animate);
+            }
+        }
+
+        animate();
+    }
+
+    function hideStationPopup() {
+        document.getElementById('station-popup').style.display = 'none';
+        selectedStation = null; // Clear the selected station state
+
+        // Clear the real-time update interval
+        if (marsTimeIntervalId) {
+            clearInterval(marsTimeIntervalId);
+        }
+    }
+
+    // Show station popup
+    function showStationPopup(station) {
+        const popup = document.getElementById('station-popup');
+        popup.style.display = 'block';
+        popup.style.left = '13.5%';
+        popup.style.top = '50%';
+        popup.style.transform = 'translate(-50%, -50%)';
+
+        popup.innerHTML = `
+                    <span id="popup-close"
+                      style="position: absolute; top: 5px; right: 10px; cursor: pointer; color: #610000; font-weight: bold; font-size: 16px;">
+                    X
+                </span>
+                    <h3>📍 ${station.name}</h3>
+                    <p><strong>Type:</strong> ${station.type}</p>
+                    <p><strong>Coordinates:</strong> ${station.lat.toFixed(2)}° ${station.lat >= 0 ? 'N' : 'S'}, ${Math.abs(station.lon).toFixed(2)}° ${station.lon >= 0 ? 'E' : 'W'}</p>
+                    <p>${station.description}</p>
+                    <hr style="border-color: #ff6b35;">
+                    <h4><span id="station-popup-time">Calculating...</span></h4>
+                    <img src=${station.image} width="250px" height="auto">
+                `;
+
+        document.getElementById('popup-close').addEventListener('click', hideStationPopup);
+        fetchMarsTime(station)
+    }
+
+    // Load Mars texture
+    const textureLoader = new THREE.TextureLoader();
+    textureLoader.load(
+        '/static/mars_map_2k.jpg',
+        function (texture) {
+            const material = new THREE.MeshPhongMaterial({
+                map: texture,
+                shininess: 5
+            });
+
+            mars = new THREE.Mesh(geometry, material);
+            scene.add(mars);
+
+            // Create station markers AFTER mars is created
+            stations.forEach(station => {
+                const markerObj = createStationMarker(station);
+                stationMarkers.push(markerObj);
+            });
+
+            document.getElementById('loading').style.display = 'none';
+            populateStationsIndex();
+            animate();
+        },
+        undefined,
+        function (error) {
+            console.error('Error loading Mars texture:', error);
+            document.getElementById('loading').textContent = 'Error loading texture.';
+        }
+    );
+
+    // Raycasting for clicking markers
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    // Mouse interaction variables
+    let isDragging = false;
+    let hasDragged = false;
+    let previousMousePosition = {x: 0, y: 0};
+    let spherical = new THREE.Spherical();
+    let rotateStart = new THREE.Vector2();
+    let rotateEnd = new THREE.Vector2();
+    let rotateDelta = new THREE.Vector2();
+
+    renderer.domElement.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        hasDragged = false;
+        rotateStart.set(e.clientX, e.clientY);
+        previousMousePosition = {x: e.clientX, y: e.clientY};
+    });
+
+    renderer.domElement.addEventListener('mousemove', (e) => {
+        if (isDragging && mars) {
+            const deltaX = e.clientX - previousMousePosition.x;
+            const deltaY = e.clientY - previousMousePosition.y;
+
+            if (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2) {
+                hasDragged = true;
+            }
+
+            rotateEnd.set(e.clientX, e.clientY);
+            rotateDelta.subVectors(rotateEnd, rotateStart).multiplyScalar(0.5);
+
+            // Convert camera position to spherical coordinates
+            spherical.setFromVector3(camera.position);
+
+            // Rotate around Mars
+            spherical.theta -= 2 * Math.PI * rotateDelta.x / window.innerWidth;
+            spherical.phi -= 2 * Math.PI * rotateDelta.y / window.innerHeight;
+
+            // Restrict phi to prevent flipping
+            spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+
+            // Update camera position
+            camera.position.setFromSpherical(spherical);
+            camera.lookAt(0, 0, 0);
+
+            rotateStart.copy(rotateEnd);
+            previousMousePosition = {x: e.clientX, y: e.clientY};
+        }
+    });
+
+    renderer.domElement.addEventListener('mouseup', (e) => {
+        if (!hasDragged && mars) {
+            // Check for marker clicks
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            const clickableObjects = stationMarkers.flatMap(m => [m.marker, m.ring]);
+            const intersects = raycaster.intersectObjects(clickableObjects);
+
+            if (intersects.length > 0) {
+                const station = intersects[0].object.userData.station;
+                if (station) {
+                    focusOnStation(station);
+                }
+            }
+        }
+        isDragging = false;
+    });
+
+    renderer.domElement.addEventListener('mouseleave', () => {
+        isDragging = false;
+    });
+
+    // Zoom with mouse wheel
+    renderer.domElement.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        camera.position.z += e.deltaY * 0.001;
+        camera.position.z = Math.max(1.5, Math.min(5, camera.position.z));
+    });
+
+    // Animation loop
+    function animate() {
+        requestAnimationFrame(animate);
+
+        // Update light position to follow camera
+        sunLight.position.copy(camera.position);
+
+        renderer.render(scene, camera);
+    }
+
+    function updateClock() {
+        // 1. Get the current time
+        const now = new Date();
+
+        // 2. Extract hours, minutes, and seconds
+        let hours = now.getUTCHours();
+        let minutes = now.getUTCMinutes();
+        let seconds = now.getUTCSeconds();
+
+        // 3. Format the numbers (Pad with leading zero if needed: 1 -> 01)
+        // The padStart(2, '0') method ensures the number is at least 2 digits long,
+        // padding with '0' if it's less.
+        hours = String(hours).padStart(2, '0');
+        minutes = String(minutes).padStart(2, '0');
+        seconds = String(seconds).padStart(2, '0');
+
+        // 4. Combine into the desired format
+        // 5. Update the HTML element
+        document.getElementById('live-clock-utc').textContent = `${hours}:${minutes}:${seconds} UTC`;
+    }
+
+    updateClock();
+    setInterval(updateClock, 1000);
+
+
+    function fetchMarsTime(station) {
+        if (marsTimeIntervalId) {
+            clearInterval(marsTimeIntervalId);
+        }
+
+        marsTimeIntervalId = setInterval(() => {
+            const timeDisplayEl = document.getElementById('station-popup-time');
+
+            // Set initial loading state
+            if (timeDisplayEl) timeDisplayEl.textContent = '...Calculating LTST';
+
+            // 1. Get current UTC time in ISO format for the API
+            const now = new Date().toISOString();
+
+            // 2. Data payload for the POST request
+            const data = {
+                earth_time: now,
+                lon: station.lon,
+            };
+
+            fetch('/api/mars_time', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data),
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.ltst) {
+                        timeDisplayEl.textContent = `${data.ltst} LTST`;
+                    } else if (data.error) {
+                        timeDisplayEl.textContent = `Error: ${data.error}`;
+                    }
+                })
+                .catch(error => {
+                    console.error('API Fetch Error:', error);
+                    timeDisplayEl.textContent = 'Comm Error.';
+                });
+        }, 1000);
+    }
+
+    // Handle window resizing
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+</script>
+</body>
+</html>

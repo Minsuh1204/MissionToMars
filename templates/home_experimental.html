@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realistic 3D Mars Viewer</title>
+    <style>
+        body { margin: 0; background-color: #000000; overflow: hidden; font-family: Arial, sans-serif; }
+        canvas { display: block; }
+
+        #info-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 10;
+            max-width: 300px;
+        }
+
+        #info-overlay h1 {
+            margin: 0 0 10px 0;
+            font-size: 20px;
+        }
+
+        #info-overlay p {
+            margin: 5px 0;
+            font-size: 12px;
+        }
+
+        #stations-index {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 10;
+            max-width: 250px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        #stations-index h2 {
+            margin: 0 0 15px 0;
+            font-size: 18px;
+            border-bottom: 2px solid #ff6b35;
+            padding-bottom: 5px;
+        }
+
+        .station-item {
+            padding: 10px;
+            margin: 5px 0;
+            background: rgba(255, 107, 53, 0.2);
+            border-left: 3px solid #ff6b35;
+            cursor: pointer;
+            transition: all 0.3s;
+            border-radius: 4px;
+        }
+
+        .station-item:hover {
+            background: rgba(255, 107, 53, 0.4);
+            transform: translateX(-5px);
+        }
+
+        .station-name {
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 3px;
+        }
+
+        .station-coords {
+            font-size: 11px;
+            color: #aaa;
+        }
+
+        #station-popup {
+            position: absolute;
+            left: 10px;
+            bottom: 10px;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid #ff6b35;
+            z-index: 20;
+            display: none;
+            max-width: 300px;
+        }
+
+        #station-popup h3 {
+            margin: 0 0 10px 0;
+            color: #ff6b35;
+        }
+
+        #station-popup p {
+            margin: 5px 0;
+            font-size: 13px;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
+            z-index: 5;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #ff6b35;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info-overlay">
+        <h1>🔴 Mars Station Viewer</h1>
+        <p>Explore Mars research stations</p>
+        <p><strong>Controls:</strong></p>
+        <p>• Drag to rotate</p>
+        <p>• Scroll to zoom</p>
+        <p>• Click markers or sidebar to view stations</p>
+    </div>
+
+    <div id="stations-index">
+        <h2>Mars Stations</h2>
+        <div id="stations-list"></div>
+    </div>
+
+    <div id="station-popup"></div>
+    <div id="loading">Loading Mars texture...</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Mars stations database (lat, lon in degrees)
+        const stations = [
+            {
+                name: "Olympus Mons Base",
+                lat: 18.65,
+                lon: -133.8,
+                description: "Research station at the summit of the largest volcano in the solar system.",
+                type: "Research"
+            },
+            {
+                name: "Valles Marineris Station",
+                lat: -13.9,
+                lon: -59.2,
+                description: "Deep canyon exploration facility studying Mars' geological history.",
+                type: "Exploration"
+            },
+            {
+                name: "Gale Crater Lab",
+                lat: -5.4,
+                lon: 137.8,
+                description: "Site of extensive water flow research and rover operations.",
+                type: "Research"
+            },
+            {
+                name: "Hellas Basin Outpost",
+                lat: -42.4,
+                lon: 70.5,
+                description: "Located in one of the deepest impact craters in the solar system.",
+                type: "Mining"
+            },
+            {
+                name: "Jezero Crater Base",
+                lat: 18.38,
+                lon: 77.58,
+                description: "Ancient river delta exploration site with biosignature research.",
+                type: "Research"
+            },
+            {
+                name: "Arcadia Planitia Hub",
+                lat: 46.7,
+                lon: -170.0,
+                description: "Northern plains ice mining and habitation center.",
+                type: "Colony"
+            },
+            {
+                name: "Elysium Mons Station",
+                lat: 25.02,
+                lon: 147.21,
+                description: "Volcanic studies and geothermal energy research facility.",
+                type: "Energy"
+            }
+        ];
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        camera.position.z = 2.5;
+
+        // Lighting - brighter ambient light and directional light that follows camera
+        const ambientLight = new THREE.AmbientLight(0x666666);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        scene.add(sunLight);
+
+        // Create Mars geometry
+        const geometry = new THREE.SphereGeometry(1, 64, 64);
+        let mars;
+        let stationMarkers = [];
+        let selectedStation = null;
+        let selectedMarker = null;
+
+        const stationPopup = document.getElementById('station-popup');
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // Projector utility for 3D to 2D conversion
+        const vector = new THREE.Vector3();
+
+        // Mouse interaction variables (simplified for camera movement)
+        let isDragging = false;
+        let hasDragged = false;
+        let rotateStart = new THREE.Vector2();
+        let rotateEnd = new THREE.Vector2();
+        let rotateDelta = new THREE.Vector2();
+        let spherical = new THREE.Spherical();
+
+        // Convert lat/lon to 3D position on sphere (using the corrected formula from previous response)
+        function latLonToVector3(lat, lon, radius) {
+            // phi: Polar Angle (0 at North Pole, PI at South Pole)
+            const phi = THREE.MathUtils.degToRad(90 - lat);
+            // theta: Azimuthal Angle (Longitude).
+            const theta = THREE.MathUtils.degToRad(lon);
+
+            // Cartesian Coordinates (0 deg Lon at +X)
+            const x = radius * Math.sin(phi) * Math.cos(theta);
+            const y = radius * Math.cos(phi);
+            const z = radius * Math.sin(phi) * Math.sin(theta);
+
+            return new THREE.Vector3(x, y, z);
+        }
+
+        // Create station markers
+        function createStationMarker(station) {
+            const markerGeometry = new THREE.SphereGeometry(0.02, 16, 16);
+            const markerMaterial = new THREE.MeshBasicMaterial({
+                color: 0xff6b35,
+                emissive: 0xff6b35,
+                emissiveIntensity: 0.5
+            });
+            const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+
+            // Use a slight radius offset for the marker to sit just above the surface (1.01)
+            const position = latLonToVector3(station.lat, station.lon, 1.01);
+            marker.position.copy(position);
+
+            const ringGeometry = new THREE.RingGeometry(0.03, 0.04, 32);
+            const ringMaterial = new THREE.MeshBasicMaterial({
+                color: 0xff6b35,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.6
+            });
+            const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+            ring.lookAt(new THREE.Vector3(0, 0, 0));
+            ring.position.copy(position);
+
+            marker.userData.station = station;
+            ring.userData.station = station;
+
+            // Marker and ring are added directly to the scene, not as children of Mars,
+            // because you are rotating the CAMERA around a fixed Mars.
+            scene.add(marker);
+            scene.add(ring);
+
+            // Store the marker object itself for easy lookup and tracking
+            station.markerObject = marker;
+
+            return { marker, ring };
+        }
+
+        // Populate stations index
+        function populateStationsIndex() {
+            const listEl = document.getElementById('stations-list');
+            listEl.innerHTML = '';
+
+            stations.forEach((station, index) => {
+                const item = document.createElement('div');
+                item.className = 'station-item';
+                item.innerHTML = `
+                    <div class="station-name">${station.name}</div>
+                    <div class="station-coords">${station.type} • ${station.lat.toFixed(1)}°, ${station.lon.toFixed(1)}°</div>
+                `;
+                item.addEventListener('click', () => focusOnStation(station));
+                listEl.appendChild(item);
+            });
+        }
+
+        // Focus camera on station
+        function focusOnStation(station) {
+            // Deselect previous marker
+            if (selectedMarker) {
+                selectedMarker.material.color.set(0xff6b35); // Reset color
+            }
+
+            // Find the 3D marker object
+            const markerObj = stations.find(s => s.name === station.name).markerObject;
+            if (!markerObj) return;
+
+            selectedMarker = markerObj;
+            selectedMarker.material.color.set(0x00ff00); // Highlight selected marker
+
+            // Get the 3D position of the station on Mars surface
+            const stationPos = latLonToVector3(station.lat, station.lon, camera.position.length());
+
+            // Animate camera to the position needed to view the station
+            animateCameraToPosition(stationPos, station.markerObject.position);
+
+            // Show popup
+            showStationPopup(station);
+        }
+
+        // Animate camera to new position
+        function animateCameraToPosition(targetPos, lookAtPos) {
+            const startPos = camera.position.clone();
+            const duration = 1000;
+            const startTime = Date.now();
+            let animationFrameId;
+
+            function animateStep() {
+                const now = Date.now();
+                const progress = Math.min((now - startTime) / duration, 1);
+                const eased = 1 - Math.pow(1 - progress, 3); // ease out
+
+                camera.position.lerpVectors(startPos, targetPos, eased);
+                camera.lookAt(lookAtPos);
+
+                // Manually trigger render and update
+                renderer.render(scene, camera);
+
+                if (progress < 1) {
+                    animationFrameId = requestAnimationFrame(animateStep);
+                }
+            }
+            requestAnimationFrame(animateStep);
+        }
+
+        // --- NEW FUNCTION: Update the popup position based on the 3D marker ---
+        function updateStationPopup() {
+            if (selectedMarker) {
+                // Get the position of the marker in World Space (it's already in world space here)
+                const markerPosition = selectedMarker.position.clone();
+
+                // Project the 3D position to the 2D screen coordinates
+                markerPosition.project(camera);
+
+                // Convert normalized device coordinates (-1 to +1) to pixel coordinates
+                const x = (markerPosition.x * 0.5 + 0.5) * window.innerWidth;
+                const y = (-markerPosition.y * 0.5 + 0.5) * window.innerHeight;
+
+                // Check if the marker is in front of the camera (markerPosition.z < 1)
+                // and if it's visible on the screen
+                const isInFront = markerPosition.z < 1;
+
+                if (isInFront) {
+                    stationPopup.style.display = 'block';
+                    // Position the popup slightly to the left and above the marker
+                    stationPopup.style.left = `${x - 10}px`; // 10px offset to the left
+                    stationPopup.style.top = `${y - stationPopup.offsetHeight - 10}px`; // 10px offset up
+                } else {
+                    stationPopup.style.display = 'none';
+                }
+            }
+        }
+        // --- END NEW FUNCTION ---
+
+        // Show station popup (now just populates content, position is handled by updateStationPopup)
+        function showStationPopup(station) {
+            stationPopup.innerHTML = `
+                <h3>📍 ${station.name}</h3>
+                <p><strong>Type:</strong> ${station.type}</p>
+                <p><strong>Coordinates:</strong> ${station.lat.toFixed(2)}° ${station.lat >= 0 ? 'N' : 'S'}, ${Math.abs(station.lon).toFixed(2)}° ${station.lon >= 0 ? 'E' : 'W'}</p>
+                <p>${station.description}</p>
+                <p><strong>Time:</strong> <span id="station-time-${station.name.replace(/\s/g, '-')}">Fetching...</span></p>
+            `;
+            // Keep the popup visible until a new one is selected or the camera moves far away
+        }
+
+        // Load Mars texture
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.load(
+            '/static/mars_map_2k.jpg',
+            function (texture) {
+                const material = new THREE.MeshPhongMaterial({
+                    map: texture,
+                    shininess: 5
+                });
+
+                mars = new THREE.Mesh(geometry, material);
+                scene.add(mars);
+
+                // Create station markers AFTER mars is created
+                stations.forEach(station => {
+                    const markerObj = createStationMarker(station);
+                    stationMarkers.push(markerObj);
+                });
+
+                document.getElementById('loading').style.display = 'none';
+                populateStationsIndex();
+                animate();
+            },
+            undefined,
+            function (error) {
+                console.error('Error loading Mars texture:', error);
+                document.getElementById('loading').textContent = 'Error loading texture.';
+            }
+        );
+
+        // --- Event Listeners and Animation (Simplified for Camera Rotation) ---
+
+        // We need a manual rotation system since OrbitControls isn't used.
+        renderer.domElement.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            hasDragged = false;
+            rotateStart.set(e.clientX, e.clientY);
+        });
+
+        renderer.domElement.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                rotateEnd.set(e.clientX, e.clientY);
+                rotateDelta.subVectors(rotateEnd, rotateStart);
+
+                if (rotateDelta.length() > 2) {
+                    hasDragged = true;
+                }
+
+                // Calculate rotation delta based on screen movement
+                const deltaTheta = 2 * Math.PI * rotateDelta.x / window.innerWidth;
+                const deltaPhi = 2 * Math.PI * rotateDelta.y / window.innerHeight;
+
+                // Update spherical coordinates
+                spherical.setFromVector3(camera.position);
+
+                spherical.theta -= deltaTheta * 0.5; // Rotate around Y (Azimuth)
+                spherical.phi -= deltaPhi * 0.5;     // Rotate around X/Z (Polar)
+
+                // Restrict phi to prevent camera flipping over the pole
+                spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+
+                // Update camera position and look
+                camera.position.setFromSpherical(spherical);
+                camera.lookAt(0, 0, 0);
+
+                rotateStart.copy(rotateEnd);
+            }
+        });
+
+        renderer.domElement.addEventListener('mouseup', (e) => {
+            if (!hasDragged) {
+                // Check for marker clicks
+                mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, camera);
+
+                const clickableObjects = stationMarkers.flatMap(m => [m.marker, m.ring]);
+                const intersects = raycaster.intersectObjects(clickableObjects);
+
+                if (intersects.length > 0) {
+                    const station = intersects[0].object.userData.station;
+                    if (station) {
+                        focusOnStation(station);
+                    }
+                }
+            }
+            isDragging = false;
+        });
+
+        renderer.domElement.addEventListener('mouseleave', () => {
+            isDragging = false;
+        });
+
+        // Zoom with mouse wheel (still simple Z position adjustment)
+        renderer.domElement.addEventListener('wheel', (e) => {
+            e.preventDefault();
+
+            // Calculate vector from camera to center
+            const direction = camera.position.clone().negate().normalize();
+
+            // Move camera along that vector
+            camera.position.addScaledVector(direction, e.deltaY * 0.001);
+
+            // Restrict zoom distance (minimum distance 1.5, maximum 5)
+            const distance = camera.position.length();
+            if (distance < 1.5) camera.position.setLength(1.5);
+            if (distance > 5.0) camera.position.setLength(5.0);
+
+            camera.lookAt(0, 0, 0); // Keep looking at Mars center
+        });
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 1. Update light position to follow camera
+            sunLight.position.copy(camera.position);
+
+            // 2. NEW: Update the popup position every frame
+            updateStationPopup();
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resizing
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
